@@ -1086,11 +1086,41 @@ window.__ModuleLoader__.load({
       return { colors, angle };
     }
 
-    /** `linear-gradient()` text for an evenly spaced stop list. */
+    /** Anchor spots for the soft color blobs, before the angle rotates them. */
+    const GRADIENT_ANCHORS = [[16, 20], [84, 14], [72, 84], [26, 78], [50, 50]];
+
+    /** Rotate one percentage anchor around the centre by `angle` degrees. */
+    function rotateAnchor(anchor, angle) {
+      const radians = ((angle - 135) * Math.PI) / 180;
+      const dx = anchor[0] - 50;
+      const dy = anchor[1] - 50;
+      const cos = Math.cos(radians);
+      const sin = Math.sin(radians);
+      return [
+        Math.round((50 + dx * cos - dy * sin) * 10) / 10,
+        Math.round((50 + dx * sin + dy * cos) * 10) / 10,
+      ];
+    }
+
+    /**
+     * Soft, irregular backdrop text for a custom gradient: one translucent
+     * radial blob per color at a rotated anchor, over a faint linear base.
+     * Matches the bundled rainbow palette rather than a straight two-stop ramp.
+     */
     function gradientCssValue(colors, angle) {
+      const safeAngle = typeof angle === 'number' && Number.isFinite(angle) ? angle : 135;
       const step = colors.length > 1 ? 100 / (colors.length - 1) : 100;
-      const stops = colors.map((color, index) => color + ' ' + Math.round(index * step) + '%').join(', ');
-      return 'linear-gradient(' + angle + 'deg, ' + stops + ')';
+      const baseStops = colors
+        .map((color, index) => withAlpha(color, 0.55) + ' ' + Math.round(index * step) + '%')
+        .join(', ');
+      const base = 'linear-gradient(' + safeAngle + 'deg, ' + baseStops + ')';
+      if (colors.length < 2) return base;
+      const blobs = colors.map((color, index) => {
+        const anchor = rotateAnchor(GRADIENT_ANCHORS[index % GRADIENT_ANCHORS.length], safeAngle);
+        return 'radial-gradient(ellipse at ' + anchor[0] + '% ' + anchor[1] + '%, '
+          + withAlpha(color, 0.82) + ' 0%, ' + withAlpha(color, 0) + ' 62%)';
+      });
+      return blobs.concat([base]).join(', ');
     }
 
     /**
