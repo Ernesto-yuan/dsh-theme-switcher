@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Theme switcher">
+  <rect x="2" y="2" width="60" height="60" rx="17" fill="#1b2130"/>
+  <circle cx="32" cy="32" r="17" fill="none" stroke="#cfd8ea" stroke-opacity="0.45" stroke-width="2.5"/>
+  <path d="M32 15a17 17 0 0 1 17 17H32z" fill="#4da3ff"/>
+  <path d="M49 32a17 17 0 0 1-17 17V32z" fill="#ffc857"/>
+  <path d="M32 49a17 17 0 0 1-17-17h17z" fill="#3ddc97"/>
+  <path d="M15 32a17 17 0 0 1 17-17v17z" fill="#f0719a"/>
+  <circle cx="32" cy="32" r="7" fill="#1b2130"/>
+  <circle cx="32" cy="32" r="4" fill="#f4f7ff"/>
+</svg>

@@ -1,0 +1,53 @@
+{
+  "name": "dsh-theme-switcher",
+  "version": "1.9.0",
+  "description": "Personalization for DSH: 20 light/dark palettes including macaron gradients and a rainbow, eight emoji backgrounds and a custom image, frosted glass, and a pinned sidebar page. 个性化：配色、渐变、Emoji 背景与高级材质。",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "theme",
+    "palette",
+    "personalization",
+    "glass",
+    "emoji"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "icon": "icon.svg",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ernesto-yuan/dsh-theme-switcher.git"
+  },
+  "homepage": "https://github.com/Ernesto-yuan/dsh-theme-switcher#readme",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-theme",
+        "@deepseek-ai/dsh-client-ui-settings-general",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  }
+}
