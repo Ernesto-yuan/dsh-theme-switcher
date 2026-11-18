@@ -673,12 +673,21 @@ window.__ModuleLoader__.load({
 .dsh-theme-switcher-custom-text:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
 .dsh-theme-switcher-color { flex: none; width: 40px; height: 28px; padding: 2px; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); cursor: pointer; }
 .dsh-theme-switcher-angle { box-sizing: border-box; flex: none; width: 64px; height: 28px; padding: 0 6px; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; }
-.dsh-theme-switcher-custom-list { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 28px; }
+.dsh-theme-switcher-custom-list { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 8px; min-height: 28px; }
 .dsh-theme-switcher-custom-empty { font-size: 12px; line-height: 20px; color: var(--dsw-alias-label-secondary); }
-.dsh-theme-switcher-custom-chip { display: inline-flex; align-items: center; overflow: hidden; border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; background: var(--dsw-alias-bg-layer-1); }
-.dsh-theme-switcher-custom-chip-active { border-color: var(--dsw-alias-brand-primary); box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary); }
-.dsh-theme-switcher-custom-apply { max-width: 168px; overflow: hidden; padding: 4px 10px; border: none; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; cursor: pointer; text-overflow: ellipsis; white-space: nowrap; }
-.dsh-theme-switcher-custom-delete { padding: 2px 8px 2px 2px; border: none; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 14px; line-height: 1; cursor: pointer; }
+.dsh-theme-switcher-saved { display: flex; flex-direction: column; gap: 4px; width: 78px; }
+.dsh-theme-switcher-saved-apply { box-sizing: border-box; width: 78px; height: 54px; padding: 0; overflow: hidden; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); cursor: pointer; }
+.dsh-theme-switcher-saved-apply:hover { border-color: var(--dsw-alias-brand-primary); }
+.dsh-theme-switcher-saved-active .dsh-theme-switcher-saved-apply { border-color: var(--dsw-alias-brand-primary); box-shadow: inset 0 0 0 2px var(--dsw-alias-brand-primary); }
+.dsh-theme-switcher-saved-preview { display: flex; width: 100%; height: 100%; }
+.dsh-theme-switcher-saved-side { width: 32%; }
+.dsh-theme-switcher-saved-body { display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 4px; padding: 0 6px; background: var(--dsw-alias-bg-base); }
+.dsh-theme-switcher-saved-line { height: 3px; border-radius: 2px; background: var(--dsw-alias-label-primary); opacity: .42; }
+.dsh-theme-switcher-saved-dot { width: 6px; height: 6px; border-radius: 50%; }
+.dsh-theme-switcher-saved-caption { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.dsh-theme-switcher-saved-name { flex: 1; min-width: 0; overflow: hidden; font-size: 11px; line-height: 14px; color: var(--dsw-alias-label-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.dsh-theme-switcher-saved-active .dsh-theme-switcher-saved-name { color: var(--dsw-alias-brand-primary); }
+.dsh-theme-switcher-custom-delete { flex: none; padding: 0 1px; border: none; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 1; cursor: pointer; }
 .dsh-theme-switcher-custom-delete:hover { color: var(--dsw-alias-state-error-primary); }
 `;
 
@@ -844,6 +853,41 @@ window.__ModuleLoader__.load({
     const EMOJI_TILE_BG = ['#fff5fa', '#eef6ff'];
     /** Cap on emoji characters one custom tile may carry. */
     const EMOJI_TILE_MAX = 12;
+    /** Rendered custom emoji tiles, keyed by their character set. */
+    const emojiTileCache = new Map();
+
+    /** Cached tile URL for one emoji set, so chips do not redraw per render. */
+    function emojiTileFor(chars) {
+      if (emojiTileCache.has(chars)) return emojiTileCache.get(chars);
+      const url = renderEmojiTile(chars);
+      emojiTileCache.set(chars, url);
+      return url;
+    }
+
+    /** CSS background that previews one saved backdrop inside a chip. */
+    function backdropThumbStyle(spec) {
+      if (spec === null || typeof spec !== 'object') return {};
+      if (spec.kind === 'color' && typeof spec.color === 'string') return { background: spec.color };
+      if (spec.kind === 'gradient' && typeof spec.from === 'string' && typeof spec.to === 'string') {
+        const angle = typeof spec.angle === 'number' ? spec.angle : 135;
+        return { backgroundImage: 'linear-gradient(' + angle + 'deg, ' + spec.from + ' 0%, ' + spec.to + ' 100%)' };
+      }
+      if (spec.kind === 'emoji' && typeof spec.chars === 'string') {
+        const url = emojiTileFor(spec.chars);
+        return url === null ? {} : { backgroundImage: 'url("' + url + '")', backgroundSize: 'cover' };
+      }
+      if (typeof spec.preset === 'string') {
+        const preset = EMOJI_BACKGROUNDS.find((entry) => entry.id === spec.preset);
+        return preset === undefined ? {} : { backgroundImage: 'url("' + preset.url + '")', backgroundSize: 'cover' };
+      }
+      if (typeof spec.url === 'string') {
+        return {
+          backgroundImage: 'url("' + spec.url + '")',
+          backgroundSize: spec.mode === 'tile' ? '512px auto' : 'cover',
+        };
+      }
+      return {};
+    }
 
     /** Whether a value is a `#rrggbb` color. */
     function isHexColor(value) {
@@ -1253,6 +1297,26 @@ window.__ModuleLoader__.load({
         }
       };
 
+      /** Inline style that draws one saved backdrop as the preview's side strip. */
+      const previewStyle = (spec) => {
+        const backdrop = normalizeBackground(spec);
+        if (backdrop === null) return {};
+        if (backdrop.kind === 'color') return { background: backdrop.color };
+        if (backdrop.kind === 'gradient') {
+          return { background: 'linear-gradient(' + backdrop.angle + 'deg, ' + backdrop.from + ', ' + backdrop.to + ')' };
+        }
+        return { backgroundImage: 'url("' + backdrop.url + '")', backgroundSize: 'cover', backgroundPosition: 'center' };
+      };
+
+      /** Accent dot color for one saved backdrop. */
+      const previewDot = (spec) => {
+        const backdrop = normalizeBackground(spec);
+        if (backdrop === null) return 'var(--dsw-alias-brand-primary)';
+        if (backdrop.kind === 'color') return backdrop.color;
+        if (backdrop.kind === 'gradient') return backdrop.to;
+        return 'var(--dsw-alias-brand-primary)';
+      };
+
       const card = (id, title, description, palettes) => {
         const active = selected === id;
         return h('button', {
@@ -1356,21 +1420,31 @@ window.__ModuleLoader__.load({
             ? h('span', { className: 'dsh-theme-switcher-custom-empty' }, t('background.customEmpty'))
             : customs.map((item) => h('div', {
               key: item.id,
-              className: 'dsh-theme-switcher-custom-chip' + (activeCustom === item.id ? ' dsh-theme-switcher-custom-chip-active' : ''),
+              className: 'dsh-theme-switcher-saved' + (activeCustom === item.id ? ' dsh-theme-switcher-saved-active' : ''),
             },
             h('button', {
               type: 'button',
-              className: 'dsh-theme-switcher-custom-apply',
+              className: 'dsh-theme-switcher-saved-apply',
+              title: item.name,
+              'aria-label': item.name,
               'aria-pressed': activeCustom === item.id ? 'true' : 'false',
               onClick: () => applySaved(item),
-            }, item.name),
-            h('button', {
-              type: 'button',
-              className: 'dsh-theme-switcher-custom-delete',
-              title: t('background.delete'),
-              'aria-label': t('background.delete') + ' ' + item.name,
-              onClick: () => deleteSaved(item.id),
-            }, '×')))),
+            },
+            h('span', { className: 'dsh-theme-switcher-saved-preview' },
+              h('span', { className: 'dsh-theme-switcher-saved-side', style: previewStyle(item.spec) }),
+              h('span', { className: 'dsh-theme-switcher-saved-body' },
+                h('span', { className: 'dsh-theme-switcher-saved-line', style: { width: '68%' } }),
+                h('span', { className: 'dsh-theme-switcher-saved-line', style: { width: '42%' } }),
+                h('span', { className: 'dsh-theme-switcher-saved-dot', style: { background: previewDot(item.spec) } })))),
+            h('div', { className: 'dsh-theme-switcher-saved-caption' },
+              h('span', { className: 'dsh-theme-switcher-saved-name', title: item.name }, item.name),
+              h('button', {
+                type: 'button',
+                className: 'dsh-theme-switcher-custom-delete',
+                title: t('background.delete'),
+                'aria-label': t('background.delete') + ' ' + item.name,
+                onClick: () => deleteSaved(item.id),
+              }, '×'))))),
         h('p', { className: 'dsh-theme-switcher-label' }, t('background.customLabel')),
         h('div', { className: 'dsh-theme-switcher-custom' },
           h('div', { className: 'dsh-theme-switcher-custom-row' },
