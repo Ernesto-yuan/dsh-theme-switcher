@@ -989,6 +989,13 @@ window.__ModuleLoader__.load({
       return canvas.toDataURL('image/jpeg', 0.9);
     }
 
+    /**
+     * Opacity of the palette gradient when it sits over a picture as a filter.
+     * The palette keeps its own colours and per-layer alphas; only this whole
+     * layer's opacity changes, so the scheme itself stays the same.
+     */
+    const PALETTE_OVERLAY_OPACITY = 0.5;
+
     /** Stylesheet painting a custom gradient backdrop. */
     function customGradientCss(backdrop) {
       const colors = Array.isArray(backdrop.colors) && backdrop.colors.length >= GRADIENT_MIN_STOPS
@@ -1044,27 +1051,29 @@ window.__ModuleLoader__.load({
           '',
         ].join('\n');
       }
-      // A gradient palette is itself several comma-separated layers. Every
-      // per-layer list below repeats once per gradient layer plus the image,
-      // otherwise the image inherits a neighbouring layer's `cover` and blows
-      // up to full-window size.
-      const gradientLayers = gradient.light.split(/,\s*(?=(?:repeating-)?(?:radial|linear)-gradient\()/);
-      const sizes = gradientLayers.map(() => 'cover').concat([imageSize]);
-      const repeats = gradientLayers.map(() => 'no-repeat').concat([imageRepeat]);
-      const attachments = gradientLayers.map(() => 'fixed').concat([imageAttach]);
-      const positions = gradientLayers.map(() => 'center center').concat(['center center']);
-      const blends = gradientLayers.map(() => 'soft-light').concat(['normal']);
+      // Both at once: the picture stays the page background, and the palette's
+      // own gradient sits on top as a fixed, semi-transparent filter layer.
+      // The palette colours keep their original values and alphas; only the
+      // whole layer's opacity changes.
       return [
         'body {',
-        '  background-image: ' + gradient.light + ', ' + image + ' !important;',
-        '  background-size: ' + sizes.join(', ') + ' !important;',
-        '  background-position: ' + positions.join(', ') + ' !important;',
-        '  background-repeat: ' + repeats.join(', ') + ' !important;',
-        '  background-attachment: ' + attachments.join(', ') + ' !important;',
-        '  background-blend-mode: ' + blends.join(', ') + ' !important;',
+        '  background-image: ' + image + ' !important;',
+        '  background-size: ' + imageSize + ' !important;',
+        '  background-position: center center !important;',
+        '  background-repeat: ' + imageRepeat + ' !important;',
+        '  background-attachment: ' + imageAttach + ' !important;',
         '}',
-        'body[data-ds-dark-theme] {',
-        '  background-image: ' + gradient.dark + ', ' + image + ' !important;',
+        'body::before {',
+        "  content: '' !important;",
+        '  position: fixed !important;',
+        '  inset: 0 !important;',
+        '  z-index: -1 !important;',
+        '  pointer-events: none !important;',
+        '  background-image: ' + gradient.light + ' !important;',
+        '  opacity: ' + PALETTE_OVERLAY_OPACITY + ' !important;',
+        '}',
+        'body[data-ds-dark-theme]::before {',
+        '  background-image: ' + gradient.dark + ' !important;',
         '}',
         '',
       ].join('\n');
