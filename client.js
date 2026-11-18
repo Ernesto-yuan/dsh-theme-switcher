@@ -464,6 +464,7 @@ window.__ModuleLoader__.load({
       'background.nameHint': '给它起个名字，例如 奶油黄',
       'background.save': '保存并应用',
       'background.delete': '删除',
+      'background.rename': '重命名',
       'background.customEmoji': 'Emoji 组合',
       'background.customEmojiHint': '输入或粘贴几个 Emoji，例如 🐳🌙✨',
       'background.apply': '应用',
@@ -555,6 +556,7 @@ window.__ModuleLoader__.load({
       'background.nameHint': 'Name it, e.g. Butter yellow',
       'background.save': 'Save and apply',
       'background.delete': 'Delete',
+      'background.rename': 'Rename',
       'background.customEmoji': 'Emoji set',
       'background.customEmojiHint': 'Type or paste a few emoji, e.g. 🐳🌙✨',
       'background.apply': 'Apply',
@@ -692,12 +694,17 @@ window.__ModuleLoader__.load({
 .dsh-theme-switcher-saved-apply:hover { border-color: var(--dsw-alias-brand-primary); }
 .dsh-theme-switcher-saved-active .dsh-theme-switcher-saved-apply { border-color: var(--dsw-alias-brand-primary); box-shadow: inset 0 0 0 2px var(--dsw-alias-brand-primary); }
 .dsh-theme-switcher-saved-preview { display: flex; width: 100%; height: 100%; }
+.dsh-theme-switcher-saved-image { display: block; width: 100%; height: 100%; background-position: center; background-size: cover; }
 .dsh-theme-switcher-saved-side { width: 32%; }
 .dsh-theme-switcher-saved-body { display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 4px; padding: 0 6px; background: var(--dsw-alias-bg-base); }
 .dsh-theme-switcher-saved-line { height: 3px; border-radius: 2px; background: var(--dsw-alias-label-primary); opacity: .42; }
 .dsh-theme-switcher-saved-dot { width: 6px; height: 6px; border-radius: 50%; }
 .dsh-theme-switcher-saved-caption { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.dsh-theme-switcher-saved-name { flex: 1; min-width: 0; overflow: hidden; font-size: 11px; line-height: 14px; color: var(--dsw-alias-label-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.dsh-theme-switcher-saved-name { flex: 1; min-width: 0; overflow: hidden; font-size: 11px; line-height: 14px; color: var(--dsw-alias-label-secondary); text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+.dsh-theme-switcher-saved-rename { box-sizing: border-box; flex: 1; min-width: 0; height: 16px; padding: 0 2px; border: 1px solid var(--dsw-alias-brand-primary); border-radius: 3px; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; font-size: 11px; line-height: 14px; }
+.dsh-theme-switcher-saved-rename:focus { outline: none; }
+.dsh-theme-switcher-saved-rename-btn { flex: none; padding: 0 1px; border: none; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1; cursor: pointer; }
+.dsh-theme-switcher-saved-rename-btn:hover { color: var(--dsw-alias-brand-primary); }
 .dsh-theme-switcher-saved-active .dsh-theme-switcher-saved-name { color: var(--dsw-alias-brand-primary); }
 .dsh-theme-switcher-custom-delete { flex: none; padding: 0 1px; border: none; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 1; cursor: pointer; }
 .dsh-theme-switcher-custom-delete:hover { color: var(--dsw-alias-state-error-primary); }
@@ -1203,6 +1210,8 @@ window.__ModuleLoader__.load({
         }
       });
       const [activeCustom, setActiveCustom] = React.useState(null);
+      const [editingId, setEditingId] = React.useState(null);
+      const [editingName, setEditingName] = React.useState('');
       const [customName, setCustomName] = React.useState('');
       const [customEmoji, setCustomEmoji] = React.useState(() => (background !== null && background.kind === 'emoji' ? background.chars : ''));
       const [solidColor, setSolidColor] = React.useState(() => (background !== null && background.kind === 'color' ? background.color : '#f3e8ff'));
@@ -1364,6 +1373,37 @@ window.__ModuleLoader__.load({
         }
       };
 
+      const startRename = (item) => {
+        setEditingId(item.id);
+        setEditingName(item.name);
+      };
+
+      const cancelRename = () => {
+        setEditingId(null);
+        setEditingName('');
+      };
+
+      const commitRename = () => {
+        if (editingId === null) return;
+        const id = editingId;
+        setEditingId(null);
+        try {
+          const list = props.renameCustom(id, editingName);
+          setCustoms(list);
+          setFailure(null);
+        } catch (error) {
+          setFailure(error && error.message ? error.message : String(error));
+        }
+        setEditingName('');
+      };
+
+      /** Whether a saved backdrop is a picture, previewed as a plain thumbnail. */
+      const isPictureBackdrop = (spec) => {
+        const backdrop = normalizeBackground(spec);
+        if (backdrop === null) return false;
+        return backdrop.kind === 'emoji' || backdrop.kind === 'preset' || backdrop.kind === 'image';
+      };
+
       /** Inline style that draws one saved backdrop as the preview's side strip. */
       const previewStyle = (spec) => {
         const backdrop = normalizeBackground(spec);
@@ -1497,14 +1537,42 @@ window.__ModuleLoader__.load({
               'aria-pressed': activeCustom === item.id ? 'true' : 'false',
               onClick: () => applySaved(item),
             },
-            h('span', { className: 'dsh-theme-switcher-saved-preview' },
-              h('span', { className: 'dsh-theme-switcher-saved-side', style: previewStyle(item.spec) }),
-              h('span', { className: 'dsh-theme-switcher-saved-body' },
-                h('span', { className: 'dsh-theme-switcher-saved-line', style: { width: '68%' } }),
-                h('span', { className: 'dsh-theme-switcher-saved-line', style: { width: '42%' } }),
-                h('span', { className: 'dsh-theme-switcher-saved-dot', style: { background: previewDot(item.spec) } })))),
+            isPictureBackdrop(item.spec)
+              ? h('span', { className: 'dsh-theme-switcher-saved-image', style: previewStyle(item.spec) })
+              : h('span', { className: 'dsh-theme-switcher-saved-preview' },
+                h('span', { className: 'dsh-theme-switcher-saved-side', style: previewStyle(item.spec) }),
+                h('span', { className: 'dsh-theme-switcher-saved-body' },
+                  h('span', { className: 'dsh-theme-switcher-saved-line', style: { width: '68%' } }),
+                  h('span', { className: 'dsh-theme-switcher-saved-line', style: { width: '42%' } }),
+                  h('span', { className: 'dsh-theme-switcher-saved-dot', style: { background: previewDot(item.spec) } })))),
             h('div', { className: 'dsh-theme-switcher-saved-caption' },
-              h('span', { className: 'dsh-theme-switcher-saved-name', title: item.name }, item.name),
+              editingId === item.id
+                ? h('input', {
+                  type: 'text',
+                  className: 'dsh-theme-switcher-saved-rename',
+                  value: editingName,
+                  maxLength: 40,
+                  'aria-label': t('background.rename'),
+                  onChange: (event) => setEditingName(event.target.value),
+                  onKeyDown: (event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      commitRename();
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault();
+                      cancelRename();
+                    }
+                  },
+                  onBlur: () => commitRename(),
+                })
+                : h('span', { className: 'dsh-theme-switcher-saved-name', title: item.name, onClick: () => startRename(item) }, item.name),
+              h('button', {
+                type: 'button',
+                className: 'dsh-theme-switcher-saved-rename-btn',
+                title: t('background.rename'),
+                'aria-label': t('background.rename') + ' ' + item.name,
+                onClick: () => startRename(item),
+              }, '✎'),
               h('button', {
                 type: 'button',
                 className: 'dsh-theme-switcher-custom-delete',
@@ -1931,6 +1999,15 @@ window.__ModuleLoader__.load({
         return customs;
       };
 
+      /** Rename one saved backdrop; an empty name keeps the old one. */
+      const renameCustom = (id, name) => {
+        const label = typeof name === 'string' ? name.trim().slice(0, 40) : '';
+        if (label === '') return customs;
+        customs = customs.map((item) => (item.id === id ? { ...item, name: label } : item));
+        writeCustoms(customs);
+        return customs;
+      };
+
       ctx.effect(() => {
         customs = readCustoms();
         if (readStoredBlend()) blendEnabled = true;
@@ -1976,6 +2053,7 @@ window.__ModuleLoader__.load({
         getCustoms: () => customs,
         addCustom,
         removeCustom,
+        renameCustom,
       });
 
       slots.inject('settings.section', () => slots.register({
