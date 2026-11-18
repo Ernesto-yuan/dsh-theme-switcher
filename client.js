@@ -458,6 +458,12 @@ window.__ModuleLoader__.load({
       'background.blend': '叠加渐变',
       'background.blendHint': '把当前配色的渐变压在背景上，两个功能可以同时用；关掉只显示背景。',
       'background.customLabel': '自定义背景',
+      'background.customSaved': '我的背景',
+      'background.customEmpty': '还没有保存的背景，选好颜色或 Emoji 后点【保存并应用】',
+      'background.name': '名称',
+      'background.nameHint': '给它起个名字，例如 奶油黄',
+      'background.save': '保存并应用',
+      'background.delete': '删除',
       'background.customEmoji': 'Emoji 组合',
       'background.customEmojiHint': '输入或粘贴几个 Emoji，例如 🐳🌙✨',
       'background.apply': '应用',
@@ -540,6 +546,12 @@ window.__ModuleLoader__.load({
       'background.blend': 'Overlay the gradient',
       'background.blendHint': 'Blend the active gradient palette over the background. Turn it off to show the background alone.',
       'background.customLabel': 'Custom background',
+      'background.customSaved': 'My backgrounds',
+      'background.customEmpty': 'Nothing saved yet — pick a color or emoji, then press Save and apply',
+      'background.name': 'Name',
+      'background.nameHint': 'Name it, e.g. Butter yellow',
+      'background.save': 'Save and apply',
+      'background.delete': 'Delete',
       'background.customEmoji': 'Emoji set',
       'background.customEmojiHint': 'Type or paste a few emoji, e.g. 🐳🌙✨',
       'background.apply': 'Apply',
@@ -661,6 +673,13 @@ window.__ModuleLoader__.load({
 .dsh-theme-switcher-custom-text:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
 .dsh-theme-switcher-color { flex: none; width: 40px; height: 28px; padding: 2px; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); cursor: pointer; }
 .dsh-theme-switcher-angle { box-sizing: border-box; flex: none; width: 64px; height: 28px; padding: 0 6px; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; }
+.dsh-theme-switcher-custom-list { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 28px; }
+.dsh-theme-switcher-custom-empty { font-size: 12px; line-height: 20px; color: var(--dsw-alias-label-secondary); }
+.dsh-theme-switcher-custom-chip { display: inline-flex; align-items: center; overflow: hidden; border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; background: var(--dsw-alias-bg-layer-1); }
+.dsh-theme-switcher-custom-chip-active { border-color: var(--dsw-alias-brand-primary); box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary); }
+.dsh-theme-switcher-custom-apply { max-width: 168px; overflow: hidden; padding: 4px 10px; border: none; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; cursor: pointer; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-theme-switcher-custom-delete { padding: 2px 8px 2px 2px; border: none; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 14px; line-height: 1; cursor: pointer; }
+.dsh-theme-switcher-custom-delete:hover { color: var(--dsw-alias-state-error-primary); }
 `;
 
     /** Storage key of the advanced-material switch. */
@@ -812,6 +831,10 @@ window.__ModuleLoader__.load({
     const BACKGROUND_STORAGE_KEY = 'dsh.theme-switcher.background';
     /** Browser-local key for "blend the gradient palette over the backdrop". */
     const BLEND_STORAGE_KEY = 'dsh.theme-switcher.blend';
+    /** Browser-local key holding the user's own saved backdrops. */
+    const CUSTOMS_STORAGE_KEY = 'dsh.theme-switcher.custom-backdrops';
+    /** Upper bound on saved custom backdrops. */
+    const CUSTOMS_MAX = 12;
     /** Longest side of the stored background, in pixels. */
     const BACKGROUND_MAX_EDGE = 1920;
     /** Refuse data URLs past this length: localStorage holds roughly 5 MB. */
@@ -1078,6 +1101,15 @@ window.__ModuleLoader__.load({
         }
       });
       const fileRef = React.useRef(null);
+      const [customs, setCustoms] = React.useState(() => {
+        try {
+          return typeof props.getCustoms === 'function' ? props.getCustoms() : [];
+        } catch (error) {
+          return [];
+        }
+      });
+      const [activeCustom, setActiveCustom] = React.useState(null);
+      const [customName, setCustomName] = React.useState('');
       const [customEmoji, setCustomEmoji] = React.useState(() => (background !== null && background.kind === 'emoji' ? background.chars : ''));
       const [solidColor, setSolidColor] = React.useState(() => (background !== null && background.kind === 'color' ? background.color : '#f3e8ff'));
       const [gradientFrom, setGradientFrom] = React.useState(() => (background !== null && background.kind === 'gradient' ? background.from : '#ffd6e7'));
@@ -1123,10 +1155,7 @@ window.__ModuleLoader__.load({
         setImageBusy(true);
         try {
           const url = await imageDataUrl(file);
-          const next = { url, mode: 'cover', preset: null };
-          props.setBackgroundImage(next);
-          setBackground(next);
-          setFailure(null);
+          saveCustom({ kind: 'image', url, mode: 'cover' });
         } catch (error) {
           setFailure(t('background.failed'));
         } finally {
@@ -1136,9 +1165,9 @@ window.__ModuleLoader__.load({
 
       const applyPreset = (preset) => {
         try {
-          const next = { url: preset.url, mode: 'tile', preset: preset.id };
-          props.setBackgroundImage({ preset: preset.id, mode: 'tile' });
-          setBackground(next);
+          props.setBackgroundImage({ preset: preset.id });
+          setBackground(props.getBackgroundImage());
+          setActiveCustom(null);
           setFailure(null);
         } catch (error) {
           setFailure(error && error.message ? error.message : String(error));
@@ -1149,6 +1178,7 @@ window.__ModuleLoader__.load({
         try {
           props.setBackgroundImage(null);
           setBackground(null);
+          setActiveCustom(null);
           setFailure(null);
         } catch (error) {
           setFailure(error && error.message ? error.message : String(error));
@@ -1166,34 +1196,57 @@ window.__ModuleLoader__.load({
         }
       };
 
-      const applyCustomEmoji = () => {
+      /** Persist one backdrop under the current name, then apply it. */
+      const saveCustom = (spec) => {
         try {
-          const chars = customEmoji.trim();
-          if (chars === '') return;
-          props.setBackgroundImage({ kind: 'emoji', chars });
-          setBackground({ kind: 'emoji', chars, url: renderEmojiTile(chars), mode: 'tile', preset: null });
+          const list = props.addCustom(customName, spec);
+          setCustoms(list);
+          setBackground(props.getBackgroundImage());
+          setActiveCustom(list.length === 0 ? null : list[list.length - 1].id);
+          setCustomName('');
           setFailure(null);
         } catch (error) {
           setFailure(t('background.failed'));
         }
       };
 
+      const applyCustomEmoji = () => {
+        const chars = customEmoji.trim();
+        if (chars === '') return;
+        saveCustom({ kind: 'emoji', chars });
+      };
+
       const applySolidColor = () => {
+        saveCustom({ kind: 'color', color: solidColor });
+      };
+
+      const applyCustomGradient = () => {
+        const angle = Number(gradientAngle);
+        saveCustom({
+          kind: 'gradient',
+          from: gradientFrom,
+          to: gradientTo,
+          angle: Number.isFinite(angle) ? angle : 135,
+        });
+      };
+
+      const applySaved = (item) => {
         try {
-          props.setBackgroundImage({ kind: 'color', color: solidColor });
-          setBackground({ kind: 'color', color: solidColor, url: null, mode: 'color', preset: null });
+          props.setBackgroundImage(item.spec);
+          setBackground(props.getBackgroundImage());
+          setActiveCustom(item.id);
           setFailure(null);
         } catch (error) {
           setFailure(error && error.message ? error.message : String(error));
         }
       };
 
-      const applyCustomGradient = () => {
+      const deleteSaved = (id) => {
         try {
-          const angle = Number(gradientAngle);
-          const value = { kind: 'gradient', from: gradientFrom, to: gradientTo, angle: Number.isFinite(angle) ? angle : 135 };
-          props.setBackgroundImage(value);
-          setBackground({ ...value, url: null, mode: 'gradient', preset: null });
+          const list = props.removeCustom(id);
+          setCustoms(list);
+          setBackground(props.getBackgroundImage());
+          if (activeCustom === id) setActiveCustom(null);
           setFailure(null);
         } catch (error) {
           setFailure(error && error.message ? error.message : String(error));
@@ -1297,8 +1350,39 @@ window.__ModuleLoader__.load({
             style: { backgroundImage: 'url("' + preset.url + '")' },
             onClick: () => applyPreset(preset),
           }))),
+        h('p', { className: 'dsh-theme-switcher-label' }, t('background.customSaved')),
+        h('div', { className: 'dsh-theme-switcher-custom-list', role: 'group', 'aria-label': t('background.customSaved') },
+          customs.length === 0
+            ? h('span', { className: 'dsh-theme-switcher-custom-empty' }, t('background.customEmpty'))
+            : customs.map((item) => h('div', {
+              key: item.id,
+              className: 'dsh-theme-switcher-custom-chip' + (activeCustom === item.id ? ' dsh-theme-switcher-custom-chip-active' : ''),
+            },
+            h('button', {
+              type: 'button',
+              className: 'dsh-theme-switcher-custom-apply',
+              'aria-pressed': activeCustom === item.id ? 'true' : 'false',
+              onClick: () => applySaved(item),
+            }, item.name),
+            h('button', {
+              type: 'button',
+              className: 'dsh-theme-switcher-custom-delete',
+              title: t('background.delete'),
+              'aria-label': t('background.delete') + ' ' + item.name,
+              onClick: () => deleteSaved(item.id),
+            }, '×')))),
         h('p', { className: 'dsh-theme-switcher-label' }, t('background.customLabel')),
         h('div', { className: 'dsh-theme-switcher-custom' },
+          h('div', { className: 'dsh-theme-switcher-custom-row' },
+            h('span', { className: 'dsh-theme-switcher-custom-name' }, t('background.name')),
+            h('input', {
+              type: 'text',
+              className: 'dsh-theme-switcher-custom-text',
+              value: customName,
+              maxLength: 40,
+              placeholder: t('background.nameHint'),
+              onChange: (event) => setCustomName(event.target.value),
+            })),
           h('div', { className: 'dsh-theme-switcher-custom-row' },
             h('span', { className: 'dsh-theme-switcher-custom-name' }, t('background.customEmoji')),
             h('input', {
@@ -1314,7 +1398,7 @@ window.__ModuleLoader__.load({
               className: 'dsh-theme-switcher-bg-btn',
               disabled: customEmoji.trim() === '',
               onClick: applyCustomEmoji,
-            }, t('background.apply'))),
+            }, t('background.save'))),
           h('div', { className: 'dsh-theme-switcher-custom-row' },
             h('span', { className: 'dsh-theme-switcher-custom-name' }, t('background.solid')),
             h('input', {
@@ -1324,7 +1408,7 @@ window.__ModuleLoader__.load({
               value: solidColor,
               onChange: (event) => setSolidColor(event.target.value),
             }),
-            h('button', { type: 'button', className: 'dsh-theme-switcher-bg-btn', onClick: applySolidColor }, t('background.apply'))),
+            h('button', { type: 'button', className: 'dsh-theme-switcher-bg-btn', onClick: applySolidColor }, t('background.save'))),
           h('div', { className: 'dsh-theme-switcher-custom-row' },
             h('span', { className: 'dsh-theme-switcher-custom-name' }, t('background.customGradient')),
             h('input', {
@@ -1350,7 +1434,7 @@ window.__ModuleLoader__.load({
               value: gradientAngle,
               onChange: (event) => setGradientAngle(event.target.value),
             }),
-            h('button', { type: 'button', className: 'dsh-theme-switcher-bg-btn', onClick: applyCustomGradient }, t('background.apply')))),
+            h('button', { type: 'button', className: 'dsh-theme-switcher-bg-btn', onClick: applyCustomGradient }, t('background.save')))),
         h('p', { className: 'dsh-theme-switcher-label' }, t('themes.label')),
         h('div', { className: 'dsh-theme-switcher-grid', role: 'group', 'aria-label': t('themes.label') }, cards),
         failure === null ? null : h('p', { className: 'dsh-theme-switcher-error', role: 'alert' },
@@ -1409,6 +1493,7 @@ window.__ModuleLoader__.load({
       let background = null;
       let backgroundDispose = null;
       let blendEnabled = false;
+      let customs = [];
       let glassEnabled = false;
       let glassDispose = null;
 
@@ -1629,7 +1714,73 @@ window.__ModuleLoader__.load({
         paint();
       };
 
+      const readCustoms = () => {
+        try {
+          const raw = window.localStorage.getItem(CUSTOMS_STORAGE_KEY);
+          if (typeof raw !== 'string' || raw === '') return [];
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return [];
+          return parsed
+            .filter((item) => item !== null && typeof item === 'object'
+              && typeof item.id === 'string' && typeof item.name === 'string'
+              && item.spec !== null && typeof item.spec === 'object')
+            .slice(0, CUSTOMS_MAX);
+        } catch (error) {
+          return [];
+        }
+      };
+
+      const writeCustoms = (list) => {
+        try {
+          window.localStorage.setItem(CUSTOMS_STORAGE_KEY, JSON.stringify(list));
+        } catch (error) {
+          /* Quota or private mode: the list still works for this page. */
+        }
+      };
+
+      const backgroundKey = (value) => {
+        const normalized = normalizeBackground(value);
+        if (normalized === null) return null;
+        return JSON.stringify({
+          kind: normalized.kind,
+          url: normalized.kind === 'preset' || normalized.kind === 'emoji' ? null : normalized.url,
+          mode: normalized.mode,
+          preset: normalized.preset,
+          chars: normalized.chars,
+          color: normalized.color,
+          from: normalized.from,
+          to: normalized.to,
+          angle: normalized.angle,
+        });
+      };
+
+      const addCustom = (name, spec) => {
+        const normalized = normalizeBackground(spec);
+        if (normalized === null) throw new Error('the backdrop could not be built');
+        const label = typeof name === 'string' && name.trim() !== '' ? name.trim().slice(0, 40) : '自定义 ' + (customs.length + 1);
+        const entry = {
+          id: 'custom-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1000).toString(36),
+          name: label,
+          spec,
+        };
+        customs = customs.concat([entry]).slice(-CUSTOMS_MAX);
+        writeCustoms(customs);
+        setBackgroundImage(spec);
+        return customs;
+      };
+
+      const removeCustom = (id) => {
+        const target = customs.find((item) => item.id === id);
+        customs = customs.filter((item) => item.id !== id);
+        writeCustoms(customs);
+        if (target !== undefined && backgroundKey(target.spec) === backgroundKey(background)) {
+          setBackgroundImage(null);
+        }
+        return customs;
+      };
+
       ctx.effect(() => {
+        customs = readCustoms();
         if (readStoredBlend()) blendEnabled = true;
         const storedImage = readStoredBackground();
         if (storedImage !== null) background = storedImage;
@@ -1670,6 +1821,9 @@ window.__ModuleLoader__.load({
         getBackgroundImage: () => background,
         getBlend: () => blendEnabled,
         setBlend,
+        getCustoms: () => customs,
+        addCustom,
+        removeCustom,
       });
 
       slots.inject('settings.section', () => slots.register({
