@@ -913,9 +913,29 @@ window.__ModuleLoader__.load({
       return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
     }
 
+    /** Small stable hash of an emoji set, used to seed the layout. */
+    function emojiSeed(chars) {
+      let hash = 2166136261;
+      for (const ch of chars) {
+        hash ^= ch.codePointAt(0) || 0;
+        hash = Math.imul(hash, 16777619);
+      }
+      return hash >>> 0;
+    }
+
+    /** Deterministic 0–1 generator so one emoji set always draws the same tile. */
+    function seededRandom(seed) {
+      let state = seed || 1;
+      return () => {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        return state / 4294967296;
+      };
+    }
+
     /**
-     * Draw the user's own emoji set onto one 1024 px tile. Synchronous because
-     * a canvas can both draw and encode without waiting for a decoder.
+     * Draw the user's own emoji set onto one 1024 px tile, laid out like the
+     * bundled walls: uneven sizes, small rotations and jittered positions
+     * instead of a strict grid.
      * @param chars - the emoji characters to place, up to EMOJI_TILE_MAX.
      * @returns a JPEG data URL, or null when nothing was drawn.
      */
@@ -932,19 +952,39 @@ window.__ModuleLoader__.load({
       background.addColorStop(1, EMOJI_TILE_BG[1]);
       context.fillStyle = background;
       context.fillRect(0, 0, 1024, 1024);
-      const cols = list.length <= 4 ? 2 : 3;
-      const rows = Math.ceil(list.length / cols);
-      const cellWidth = 1024 / cols;
-      const cellHeight = 1024 / rows;
-      const fontSize = Math.round(Math.min(cellWidth, cellHeight) * 0.62);
-      context.font = fontSize + 'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Segoe UI Symbol", sans-serif';
       context.textAlign = 'center';
       context.textBaseline = 'middle';
       context.fillStyle = '#000000';
-      list.slice(0, EMOJI_TILE_MAX).forEach((ch, index) => {
+      const random = seededRandom(emojiSeed(chars));
+      const placed = list.slice(0, EMOJI_TILE_MAX);
+      if (placed.length === 1) {
+        const size = 520;
+        context.font = size + 'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Segoe UI Symbol", sans-serif';
+        context.save();
+        context.translate(512, 512);
+        context.rotate((random() - 0.5) * 0.5);
+        context.fillText(placed[0], 0, 0);
+        context.restore();
+        return canvas.toDataURL('image/jpeg', 0.9);
+      }
+      const cols = placed.length <= 4 ? 2 : placed.length <= 9 ? 3 : 4;
+      const rows = Math.ceil(placed.length / cols);
+      const cellWidth = 1024 / cols;
+      const cellHeight = 1024 / rows;
+      placed.forEach((ch, index) => {
         const col = index % cols;
         const row = Math.floor(index / cols);
-        context.fillText(ch, cellWidth * (col + 0.5), cellHeight * (row + 0.5));
+        const spread = Math.min(cellWidth, cellHeight);
+        const size = Math.round(spread * (0.56 + random() * 0.2));
+        const offsetX = (random() - 0.5) * spread * 0.16;
+        const offsetY = (random() - 0.5) * spread * 0.16;
+        const angle = (random() - 0.5) * 0.7;
+        context.font = size + 'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Segoe UI Symbol", sans-serif';
+        context.save();
+        context.translate(cellWidth * (col + 0.5) + offsetX, cellHeight * (row + 0.5) + offsetY);
+        context.rotate(angle);
+        context.fillText(ch, 0, 0);
+        context.restore();
       });
       return canvas.toDataURL('image/jpeg', 0.9);
     }
