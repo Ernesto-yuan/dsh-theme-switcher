@@ -755,6 +755,19 @@ window.__ModuleLoader__.load({
   -webkit-backdrop-filter: blur(22px) saturate(160%);
   backdrop-filter: blur(22px) saturate(160%);
 }
+/* The sidebar's "new session" button gets the same frost as the composer
+   card, but only in the expanded sidebar: the collapsed rail wants its
+   transparent icon button back. The class name is hashed per build, so it is
+   matched by its stable local suffix. */
+div[class*="_root"]:not([class*="_collapsed"]) div[class*="_newSessionRow"] > button[class*="_newSession"] {
+  background-color: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 62%, transparent) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(160%) !important;
+  backdrop-filter: blur(22px) saturate(160%) !important;
+  border-color: color-mix(in srgb, var(--dsw-alias-border-l2) 65%, transparent) !important;
+}
+div[class*="_root"]:not([class*="_collapsed"]) div[class*="_newSessionRow"] > button[class*="_newSession"]:hover {
+  background-color: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 80%, transparent) !important;
+}
 `;
 
     /**
