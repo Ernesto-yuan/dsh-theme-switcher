@@ -450,7 +450,7 @@ window.__ModuleLoader__.load({
       'glass.desc': '半透明面板配背景模糊，菜单、弹窗和提示气泡呈现毛玻璃质感。',
       'glass.on': '已开启',
       'background.title': '背景图片',
-      'background.desc': '选一张本地图片当页面背景，会先把长边缩到 1920 像素再保存；也可以直接点下面的 Emoji 背景。卡片和侧栏会自动变成半透明，让背景透出来。',
+      'background.desc': '选一张本地图片当页面背景，按长边最高 3840 像素、JPEG 质量 92% 保存，存在 IndexedDB 里，不占 localStorage；也可以直接点下面的 Emoji 背景。卡片和侧栏会自动变成半透明，让背景透出来。',
       'background.pick': '选择图片',
       'background.clear': '清除背景',
       'background.busy': '处理中…',
@@ -458,6 +458,7 @@ window.__ModuleLoader__.load({
       'background.blend': '叠加渐变',
       'background.blendHint': '把当前配色的渐变压在背景上，两个功能可以同时用；关掉只显示背景。',
       'background.customLabel': '自定义背景',
+      'background.autoName': '自定义',
       'background.customSaved': '我的背景',
       'background.customEmpty': '还没有保存的背景，选好颜色或 Emoji 后点【保存并应用】',
       'background.name': '名称',
@@ -542,7 +543,7 @@ window.__ModuleLoader__.load({
       'glass.desc': 'Translucent surfaces with backdrop blur give menus, dialogs, and tooltips a frosted-glass finish.',
       'glass.on': 'On',
       'background.title': 'Background image',
-      'background.desc': 'Pick a local image as the page background; it is downscaled to at most 1920 px before saving. The emoji tiles below are one click away. Cards and the sidebar turn translucent so the backdrop shows through.',
+      'background.desc': 'Pick a local image as the page background; it is kept up to 3840 px on the long edge at JPEG quality 92 and stored in IndexedDB instead of localStorage. The emoji tiles below are one click away. Cards and the sidebar turn translucent so the backdrop shows through.',
       'background.pick': 'Choose image',
       'background.clear': 'Remove',
       'background.busy': 'Processing…',
@@ -550,6 +551,7 @@ window.__ModuleLoader__.load({
       'background.blend': 'Overlay the gradient',
       'background.blendHint': 'Blend the active gradient palette over the background. Turn it off to show the background alone.',
       'background.customLabel': 'Custom background',
+      'background.autoName': 'Custom',
       'background.customSaved': 'My backgrounds',
       'background.customEmpty': 'Nothing saved yet — pick a color or emoji, then press Save and apply',
       'background.name': 'Name',
@@ -861,12 +863,143 @@ window.__ModuleLoader__.load({
     const BLEND_STORAGE_KEY = 'dsh.theme-switcher.blend';
     /** Browser-local key holding the user's own saved backdrops. */
     const CUSTOMS_STORAGE_KEY = 'dsh.theme-switcher.custom-backdrops';
+    /** Window event raised after any appearance change, so both surfaces refresh. */
+    const CHANGED_EVENT = 'dsh-theme-switcher:changed';
     /** Upper bound on saved custom backdrops. */
     const CUSTOMS_MAX = 12;
     /** Longest side of the stored background, in pixels. */
-    const BACKGROUND_MAX_EDGE = 1920;
-    /** Refuse data URLs past this length: localStorage holds roughly 5 MB. */
+    const BACKGROUND_MAX_EDGE = 3840;
+    /** JPEG quality used when re-encoding a picked picture. */
+    const BACKGROUND_QUALITY = 0.92;
+    /** Refuse fallback data URLs past this length: localStorage holds ~5 MB. */
     const BACKGROUND_MAX_CHARS = 2600000;
+    /** IndexedDB database holding full-size background pictures. */
+    const IMAGE_DB_NAME = 'dsh-theme-switcher';
+    /** IndexedDB schema version of that database. */
+    const IMAGE_DB_VERSION = 1;
+    /** Object store holding `imageId → Blob`. */
+    const IMAGE_STORE = 'images';
+    /** Object URLs of every stored picture, keyed by imageId. */
+    const imageUrls = new Map();
+
+    /** Open (and if needed create) the picture database. */
+    function openImageDb() {
+      return new Promise((resolve, reject) => {
+        if (typeof indexedDB === 'undefined' || indexedDB === null) {
+          reject(new Error('indexedDB unavailable'));
+          return;
+        }
+        const request = indexedDB.open(IMAGE_DB_NAME, IMAGE_DB_VERSION);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains(IMAGE_STORE)) db.createObjectStore(IMAGE_STORE);
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('the picture database could not be opened'));
+      });
+    }
+
+    /** Put one blob into the picture store. */
+    function putStoredImage(db, imageId, blob) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(IMAGE_STORE, 'readwrite');
+        tx.objectStore(IMAGE_STORE).put(blob, imageId);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('the picture could not be stored'));
+      });
+    }
+
+    /** Read every stored picture into object URLs. Never rejects. */
+    async function loadStoredImages() {
+      let db = null;
+      try {
+        db = await openImageDb();
+      } catch (error) {
+        return;
+      }
+      try {
+        await new Promise((resolve) => {
+          const tx = db.transaction(IMAGE_STORE, 'readonly');
+          const request = tx.objectStore(IMAGE_STORE).openCursor();
+          request.onsuccess = () => {
+            const cursor = request.result;
+            if (cursor === null || cursor === undefined) {
+              resolve();
+              return;
+            }
+            const imageId = String(cursor.key);
+            if (!imageUrls.has(imageId) && cursor.value instanceof Blob) {
+              imageUrls.set(imageId, URL.createObjectURL(cursor.value));
+            }
+            cursor.continue();
+          };
+          request.onerror = () => resolve();
+        });
+      } finally {
+        try {
+          db.close();
+        } catch (error) {
+          /* Closing a failed database is best-effort. */
+        }
+      }
+    }
+
+    /** Remove one stored picture; best-effort, never rejects. */
+    async function deleteStoredImage(imageId) {
+      imageUrls.delete(imageId);
+      let db = null;
+      try {
+        db = await openImageDb();
+      } catch (error) {
+        return;
+      }
+      try {
+        await new Promise((resolve) => {
+          const tx = db.transaction(IMAGE_STORE, 'readwrite');
+          tx.objectStore(IMAGE_STORE).delete(imageId);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+        });
+      } finally {
+        try {
+          db.close();
+        } catch (error) {
+          /* Best-effort close. */
+        }
+      }
+    }
+
+    /** Encode a blob as a data URL, for hosts without IndexedDB. */
+    function blobToDataUrl(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error || new Error('the picture could not be read'));
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    /**
+     * Persist one picture: IndexedDB first, so full resolution fits; a data URL
+     * in localStorage only as a fallback for hosts without IndexedDB.
+     */
+    async function storeImage(blob) {
+      const imageId = 'img-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e6).toString(36);
+      try {
+        const db = await openImageDb();
+        try {
+          await putStoredImage(db, imageId, blob);
+        } finally {
+          db.close();
+        }
+        imageUrls.set(imageId, URL.createObjectURL(blob));
+        return { kind: 'image', imageId, mode: 'cover' };
+      } catch (error) {
+        const dataUrl = await blobToDataUrl(blob);
+        if (dataUrl.length > BACKGROUND_MAX_CHARS) throw new Error('the image is too large after encoding');
+        return { kind: 'image', url: dataUrl, mode: 'cover' };
+      }
+    }
 
     /** Colors a custom emoji tile is drawn on, top-left to bottom-right. */
     const EMOJI_TILE_BG = ['#fff5fa', '#eef6ff'];
@@ -883,34 +1016,19 @@ window.__ModuleLoader__.load({
       return url;
     }
 
-    /** CSS background that previews one saved backdrop inside a chip. */
-    function backdropThumbStyle(spec) {
-      if (spec === null || typeof spec !== 'object') return {};
-      if (spec.kind === 'color' && typeof spec.color === 'string') return { background: spec.color };
-      if (spec.kind === 'gradient') {
-        const stops = gradientStops(spec);
-        if (stops !== null) return { backgroundImage: gradientCssValue(stops.colors, stops.angle), backgroundSize: 'cover' };
-      }
-      if (spec.kind === 'emoji' && typeof spec.chars === 'string') {
-        const url = emojiTileFor(spec.chars);
-        return url === null ? {} : { backgroundImage: 'url("' + url + '")', backgroundSize: 'cover' };
-      }
-      if (typeof spec.preset === 'string') {
-        const preset = EMOJI_BACKGROUNDS.find((entry) => entry.id === spec.preset);
-        return preset === undefined ? {} : { backgroundImage: 'url("' + preset.url + '")', backgroundSize: 'cover' };
-      }
-      if (typeof spec.url === 'string') {
-        return {
-          backgroundImage: 'url("' + spec.url + '")',
-          backgroundSize: spec.mode === 'tile' ? '512px auto' : 'cover',
-        };
-      }
-      return {};
-    }
-
     /** Whether a value is a `#rrggbb` color. */
     function isHexColor(value) {
       return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+    }
+
+    /** Cheap structural check of one saved backdrop spec, no canvas work. */
+    function isValidSpec(spec) {
+      if (spec === null || typeof spec !== 'object') return false;
+      if (spec.kind === 'color') return isHexColor(spec.color);
+      if (spec.kind === 'gradient') return gradientStops(spec) !== null;
+      if (spec.kind === 'emoji') return typeof spec.chars === 'string' && spec.chars.trim() !== '';
+      if (spec.kind === 'image') return typeof spec.imageId === 'string' || (typeof spec.url === 'string' && spec.url.indexOf('data:image/') === 0);
+      return typeof spec.preset === 'string';
     }
 
     /** Small stable hash of an emoji set, used to seed the layout. */
@@ -1052,7 +1170,8 @@ window.__ModuleLoader__.load({
         ].join('\n');
       }
       // Both at once: the picture stays the page background, and the palette's
-      // own gradient sits on top as a fixed, semi-transparent filter layer.
+      // own gradient sits on top as a fixed, semi-transparent filter layer in
+      // its own element, so no host pseudo-element or layer list is touched.
       // The palette colours keep their original values and alphas; only the
       // whole layer's opacity changes.
       return [
@@ -1063,8 +1182,7 @@ window.__ModuleLoader__.load({
         '  background-repeat: ' + imageRepeat + ' !important;',
         '  background-attachment: ' + imageAttach + ' !important;',
         '}',
-        'body::before {',
-        "  content: '' !important;",
+        '[data-theme-switcher-filter] {',
         '  position: fixed !important;',
         '  inset: 0 !important;',
         '  z-index: -1 !important;',
@@ -1072,7 +1190,7 @@ window.__ModuleLoader__.load({
         '  background-image: ' + gradient.light + ' !important;',
         '  opacity: ' + PALETTE_OVERLAY_OPACITY + ' !important;',
         '}',
-        'body[data-ds-dark-theme]::before {',
+        'body[data-ds-dark-theme] [data-theme-switcher-filter] {',
         '  background-image: ' + gradient.dark + ' !important;',
         '}',
         '',
@@ -1165,7 +1283,7 @@ window.__ModuleLoader__.load({
         }
       }
       if (value.kind === 'emoji' && typeof value.chars === 'string' && value.chars.trim() !== '') {
-        const url = renderEmojiTile(value.chars);
+        const url = emojiTileFor(value.chars);
         if (url === null) return null;
         return { kind: 'emoji', chars: value.chars, url, mode: 'tile', preset: null };
       }
@@ -1173,6 +1291,11 @@ window.__ModuleLoader__.load({
         const preset = EMOJI_BACKGROUNDS.find((entry) => entry.id === value.preset);
         if (preset === undefined) return null;
         return { kind: 'preset', preset: preset.id, url: preset.url, mode: 'tile', chars: null };
+      }
+      if (value.kind === 'image' && typeof value.imageId === 'string') {
+        const url = imageUrls.get(value.imageId);
+        if (typeof url !== 'string' || url === '') return null;
+        return { kind: 'image', imageId: value.imageId, url, mode: value.mode === 'tile' ? 'tile' : 'cover', preset: null };
       }
       if (typeof value.url === 'string' && value.url.indexOf('data:image/') === 0) {
         return { kind: 'image', url: value.url, mode: value.mode === 'tile' ? 'tile' : 'cover', preset: null };
@@ -1196,8 +1319,8 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** Downscale a picked file into a JPEG data URL small enough to persist. */
-    async function imageDataUrl(file) {
+    /** Downscale a picked file into a JPEG blob at the storage resolution. */
+    async function imageBlob(file) {
       const decoded = await decodeImage(file);
       const width = decoded.width || decoded.naturalWidth;
       const height = decoded.height || decoded.naturalHeight;
@@ -1212,10 +1335,10 @@ window.__ModuleLoader__.load({
       context.fillRect(0, 0, canvas.width, canvas.height);
       context.drawImage(decoded, 0, 0, canvas.width, canvas.height);
       if (typeof decoded.close === 'function') decoded.close();
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      if (typeof dataUrl !== 'string' || dataUrl.indexOf('data:image/') !== 0) throw new Error('the image could not be encoded');
-      if (dataUrl.length > BACKGROUND_MAX_CHARS) throw new Error('the image is too large after encoding');
-      return dataUrl;
+      if (typeof canvas.toBlob !== 'function') throw new Error('the image could not be encoded');
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', BACKGROUND_QUALITY));
+      if (blob === null || blob === undefined) throw new Error('the image could not be encoded');
+      return blob;
     }
 
     /**
@@ -1306,6 +1429,31 @@ window.__ModuleLoader__.load({
         return typeof unsubscribe === 'function' ? unsubscribe : undefined;
       }, []);
 
+      // The settings page and the pinned panel can be open at the same time;
+      // whoever changes the appearance raises this event so the other surface
+      // re-reads the shared state instead of showing stale controls.
+      React.useEffect(() => {
+        const onChange = () => {
+          try {
+            setSelected(readSelection());
+            setGlass(props.getGlass());
+            const applied = props.getBackgroundImage();
+            setBackground(applied);
+            syncInputs(applied);
+            setBlendState(props.getBlend());
+            const list = props.getCustoms();
+            setCustoms(list);
+            const key = backdropKey(applied);
+            const match = key === null ? undefined : list.find((item) => backdropKey(item.spec) === key);
+            setActiveCustom(match === undefined ? null : match.id);
+          } catch (error) {
+            /* A surface without the writers stays read-only. */
+          }
+        };
+        window.addEventListener(CHANGED_EVENT, onChange);
+        return () => window.removeEventListener(CHANGED_EVENT, onChange);
+      }, []);
+
       const choose = (id) => {
         try {
           props.selectTheme(id);
@@ -1338,8 +1486,9 @@ window.__ModuleLoader__.load({
         if (file === null) return;
         setImageBusy(true);
         try {
-          const url = await imageDataUrl(file);
-          saveCustom({ kind: 'image', url, mode: 'cover' });
+          const blob = await imageBlob(file);
+          const spec = await storeImage(blob);
+          saveCustom(spec);
         } catch (error) {
           setFailure(t('background.failed'));
         } finally {
@@ -1385,7 +1534,9 @@ window.__ModuleLoader__.load({
         try {
           const list = props.addCustom(customName, spec);
           setCustoms(list);
-          setBackground(props.getBackgroundImage());
+          const applied = props.getBackgroundImage();
+          setBackground(applied);
+          syncInputs(applied);
           setActiveCustom(list.length === 0 ? null : list[list.length - 1].id);
           setCustomName('');
           setFailure(null);
@@ -1394,8 +1545,19 @@ window.__ModuleLoader__.load({
         }
       };
 
+      /** Copy an applied backdrop back into the editor controls. */
+      const syncInputs = (backdrop) => {
+        if (backdrop === null || backdrop === undefined) return;
+        if (backdrop.kind === 'emoji') setCustomEmoji(backdrop.chars);
+        else if (backdrop.kind === 'color') setSolidColor(backdrop.color);
+        else if (backdrop.kind === 'gradient') {
+          setGradientColors(backdrop.colors.slice());
+          setGradientAngle(String(backdrop.angle));
+        }
+      };
+
       const applyCustomEmoji = () => {
-        const chars = customEmoji.trim();
+        const chars = Array.from(customEmoji.trim()).slice(0, EMOJI_TILE_MAX).join('');
         if (chars === '') return;
         saveCustom({ kind: 'emoji', chars });
       };
@@ -1432,7 +1594,9 @@ window.__ModuleLoader__.load({
       const applySaved = (item) => {
         try {
           props.setBackgroundImage(item.spec);
-          setBackground(props.getBackgroundImage());
+          const applied = props.getBackgroundImage();
+          setBackground(applied);
+          syncInputs(applied);
           setActiveCustom(item.id);
           setFailure(null);
         } catch (error) {
@@ -1481,6 +1645,22 @@ window.__ModuleLoader__.load({
         const backdrop = normalizeBackground(spec);
         if (backdrop === null) return false;
         return backdrop.kind === 'emoji' || backdrop.kind === 'preset' || backdrop.kind === 'image';
+      };
+
+      /** Comparable identity of one backdrop, used to find the active chip. */
+      const backdropKey = (value) => {
+        const backdrop = normalizeBackground(value);
+        if (backdrop === null) return null;
+        return JSON.stringify({
+          kind: backdrop.kind,
+          color: backdrop.color,
+          colors: backdrop.colors,
+          angle: backdrop.angle,
+          chars: backdrop.chars,
+          preset: backdrop.preset,
+          imageId: backdrop.imageId || null,
+          url: backdrop.kind === 'image' && !backdrop.imageId ? backdrop.url : null,
+        });
       };
 
       /** Inline style that draws one saved backdrop as the preview's side strip. */
@@ -1550,7 +1730,7 @@ window.__ModuleLoader__.load({
             className: 'dsh-theme-switcher-switch',
             onClick: toggleGlass,
           }, h('span', { className: 'dsh-theme-switcher-knob' }))),
-        h('div', { className: 'dsh-theme-switcher-glass dsh-theme-switcher-bg' },
+        h('div', { className: 'dsh-theme-switcher-glass' },
           h('div', { className: 'dsh-theme-switcher-glass-text' },
             h('div', { className: 'dsh-theme-switcher-glass-title' },
               t('background.title'),
@@ -1807,6 +1987,15 @@ window.__ModuleLoader__.load({
         }
       };
 
+      /** Tell every mounted surface that the shared appearance changed. */
+      const notifyChanged = () => {
+        try {
+          window.dispatchEvent(new CustomEvent(CHANGED_EVENT));
+        } catch (error) {
+          /* Non-browser test hosts have no event target. */
+        }
+      };
+
       const applyGradient = (definition) => {
         const style = document.createElement('style');
         style.setAttribute('data-theme-switcher-gradient', '');
@@ -1859,6 +2048,7 @@ window.__ModuleLoader__.load({
           };
         }
         writeStoredGlass(next);
+        notifyChanged();
       };
 
       const readStoredSelection = () => {
@@ -1907,7 +2097,17 @@ window.__ModuleLoader__.load({
         style.setAttribute('data-theme-switcher-background', '');
         style.textContent = backgroundCss(backdrop, gradient);
         document.head.appendChild(style);
-        backgroundDispose = () => style.remove();
+        let overlay = null;
+        if (gradient !== null && gradient !== undefined) {
+          overlay = document.createElement('div');
+          overlay.setAttribute('data-theme-switcher-filter', '');
+          overlay.setAttribute('aria-hidden', 'true');
+          document.body.appendChild(overlay);
+        }
+        backgroundDispose = () => {
+          style.remove();
+          if (overlay !== null) overlay.remove();
+        };
       };
 
       const readStoredBlend = () => {
@@ -1956,7 +2156,9 @@ window.__ModuleLoader__.load({
                 ? { kind: 'color', color: background.color }
                 : background.kind === 'gradient'
                   ? { kind: 'gradient', colors: background.colors, angle: background.angle }
-                  : { kind: 'image', url: background.url, mode: background.mode };
+                  : background.imageId
+                    ? { kind: 'image', imageId: background.imageId, mode: background.mode }
+                    : { kind: 'image', url: background.url, mode: background.mode };
           window.localStorage.setItem(BACKGROUND_STORAGE_KEY, JSON.stringify(stored));
         } catch (error) {
           /* Quota or private mode: the image still applies for this page. */
@@ -1997,6 +2199,7 @@ window.__ModuleLoader__.load({
         selected = next;
         writeStoredSelection(next);
         paint();
+        notifyChanged();
       };
 
       const setBackgroundImage = (value) => {
@@ -2004,6 +2207,7 @@ window.__ModuleLoader__.load({
         background = next;
         writeStoredBackground(next);
         paint();
+        notifyChanged();
       };
 
       const setBlend = (enabled) => {
@@ -2011,6 +2215,7 @@ window.__ModuleLoader__.load({
         blendEnabled = next;
         writeStoredBlend(next);
         paint();
+        notifyChanged();
       };
 
       const readCustoms = () => {
@@ -2022,8 +2227,8 @@ window.__ModuleLoader__.load({
           return parsed
             .filter((item) => item !== null && typeof item === 'object'
               && typeof item.id === 'string' && typeof item.name === 'string'
-              && item.spec !== null && typeof item.spec === 'object')
-            .slice(0, CUSTOMS_MAX);
+              && isValidSpec(item.spec))
+            .slice(-CUSTOMS_MAX);
         } catch (error) {
           return [];
         }
@@ -2042,7 +2247,8 @@ window.__ModuleLoader__.load({
         if (normalized === null) return null;
         return JSON.stringify({
           kind: normalized.kind,
-          url: normalized.kind === 'preset' || normalized.kind === 'emoji' ? null : normalized.url,
+          url: normalized.kind === 'preset' || normalized.kind === 'emoji' || (normalized.kind === 'image' && normalized.imageId) ? null : normalized.url,
+          imageId: normalized.imageId || null,
           mode: normalized.mode,
           preset: normalized.preset,
           chars: normalized.chars,
@@ -2056,7 +2262,9 @@ window.__ModuleLoader__.load({
       const addCustom = (name, spec) => {
         const normalized = normalizeBackground(spec);
         if (normalized === null) throw new Error('the backdrop could not be built');
-        const label = typeof name === 'string' && name.trim() !== '' ? name.trim().slice(0, 40) : '自定义 ' + (customs.length + 1);
+        const label = typeof name === 'string' && name.trim() !== ''
+          ? name.trim().slice(0, 40)
+          : translate('background.autoName') + ' ' + (customs.length + 1);
         const entry = {
           id: 'custom-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1000).toString(36),
           name: label,
@@ -2072,8 +2280,14 @@ window.__ModuleLoader__.load({
         const target = customs.find((item) => item.id === id);
         customs = customs.filter((item) => item.id !== id);
         writeCustoms(customs);
+        if (target !== undefined && target.spec !== null && typeof target.spec === 'object'
+          && target.spec.kind === 'image' && typeof target.spec.imageId === 'string') {
+          void deleteStoredImage(target.spec.imageId);
+        }
         if (target !== undefined && backgroundKey(target.spec) === backgroundKey(background)) {
           setBackgroundImage(null);
+        } else {
+          notifyChanged();
         }
         return customs;
       };
@@ -2084,32 +2298,43 @@ window.__ModuleLoader__.load({
         if (label === '') return customs;
         customs = customs.map((item) => (item.id === id ? { ...item, name: label } : item));
         writeCustoms(customs);
+        notifyChanged();
         return customs;
       };
 
       ctx.effect(() => {
-        customs = readCustoms();
-        if (readStoredBlend()) blendEnabled = true;
-        const storedImage = readStoredBackground();
-        if (storedImage !== null) background = storedImage;
-        const stored = readStoredSelection();
-        if (stored !== null) {
-          try {
-            selectTheme(stored);
-          } catch (error) {
-            console.error('theme-switcher: the saved theme could not be restored', error);
+        let cancelled = false;
+        const restore = async () => {
+          // Pictures live in IndexedDB, so the saved appearance can only be
+          // rebuilt once their object URLs exist.
+          await loadStoredImages();
+          if (cancelled) return;
+          customs = readCustoms();
+          if (readStoredBlend()) blendEnabled = true;
+          const storedImage = readStoredBackground();
+          if (storedImage !== null) background = storedImage;
+          const stored = readStoredSelection();
+          if (stored !== null) {
+            try {
+              selectTheme(stored);
+            } catch (error) {
+              console.error('theme-switcher: the saved theme could not be restored', error);
+            }
+          } else if (background !== null) {
+            paint();
           }
-        } else if (background !== null) {
-          paint();
-        }
-        if (readStoredGlass()) {
-          try {
-            setGlass(true);
-          } catch (error) {
-            console.error('theme-switcher: the saved material could not be restored', error);
+          if (readStoredGlass()) {
+            try {
+              setGlass(true);
+            } catch (error) {
+              console.error('theme-switcher: the saved material could not be restored', error);
+            }
           }
-        }
+          notifyChanged();
+        };
+        void restore();
         return () => {
+          cancelled = true;
           clearLayer();
           clearGradient();
           clearBackgroundStyle();
@@ -2133,6 +2358,7 @@ window.__ModuleLoader__.load({
         addCustom,
         removeCustom,
         renameCustom,
+        storeImage,
       });
 
       slots.inject('settings.section', () => slots.register({
