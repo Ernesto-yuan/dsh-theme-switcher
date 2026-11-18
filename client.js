@@ -457,6 +457,15 @@ window.__ModuleLoader__.load({
       'background.on': '已启用',
       'background.blend': '叠加渐变',
       'background.blendHint': '把当前配色的渐变压在背景上，两个功能可以同时用；关掉只显示背景。',
+      'background.customLabel': '自定义背景',
+      'background.customEmoji': 'Emoji 组合',
+      'background.customEmojiHint': '输入或粘贴几个 Emoji，例如 🐳🌙✨',
+      'background.apply': '应用',
+      'background.solid': '纯色',
+      'background.customGradient': '渐变',
+      'background.gradientFrom': '渐变起始色',
+      'background.gradientTo': '渐变结束色',
+      'background.gradientAngle': '渐变角度',
       'background.failed': '这张图片读不了，换一张试试',
       'background.emojiLabel': 'Emoji 背景',
       'background.emoji.sweet': '甜心',
@@ -530,6 +539,15 @@ window.__ModuleLoader__.load({
       'background.on': 'On',
       'background.blend': 'Overlay the gradient',
       'background.blendHint': 'Blend the active gradient palette over the background. Turn it off to show the background alone.',
+      'background.customLabel': 'Custom background',
+      'background.customEmoji': 'Emoji set',
+      'background.customEmojiHint': 'Type or paste a few emoji, e.g. 🐳🌙✨',
+      'background.apply': 'Apply',
+      'background.solid': 'Solid color',
+      'background.customGradient': 'Gradient',
+      'background.gradientFrom': 'Gradient start',
+      'background.gradientTo': 'Gradient end',
+      'background.gradientAngle': 'Angle',
       'background.failed': 'That image could not be read; try another one',
       'background.emojiLabel': 'Emoji backgrounds',
       'background.emoji.sweet': 'Sweet',
@@ -636,6 +654,13 @@ window.__ModuleLoader__.load({
 .dsh-theme-switcher-emoji { box-sizing: border-box; width: 78px; height: 54px; padding: 0; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background-position: center; background-size: cover; cursor: pointer; }
 .dsh-theme-switcher-emoji:hover { border-color: var(--dsw-alias-brand-primary); }
 .dsh-theme-switcher-emoji[aria-pressed="true"] { border-color: var(--dsw-alias-brand-primary); box-shadow: inset 0 0 0 2px var(--dsw-alias-brand-primary); }
+.dsh-theme-switcher-custom { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-lg); background: var(--dsw-alias-bg-layer-1); }
+.dsh-theme-switcher-custom-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dsh-theme-switcher-custom-name { flex: none; width: 84px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
+.dsh-theme-switcher-custom-text { box-sizing: border-box; flex: 1; min-width: 160px; height: 28px; padding: 0 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; }
+.dsh-theme-switcher-custom-text:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
+.dsh-theme-switcher-color { flex: none; width: 40px; height: 28px; padding: 2px; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); cursor: pointer; }
+.dsh-theme-switcher-angle { box-sizing: border-box; flex: none; width: 64px; height: 28px; padding: 0 6px; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; }
 `;
 
     /** Storage key of the advanced-material switch. */
@@ -792,6 +817,77 @@ window.__ModuleLoader__.load({
     /** Refuse data URLs past this length: localStorage holds roughly 5 MB. */
     const BACKGROUND_MAX_CHARS = 2600000;
 
+    /** Colors a custom emoji tile is drawn on, top-left to bottom-right. */
+    const EMOJI_TILE_BG = ['#fff5fa', '#eef6ff'];
+    /** Cap on emoji characters one custom tile may carry. */
+    const EMOJI_TILE_MAX = 12;
+
+    /** Whether a value is a `#rrggbb` color. */
+    function isHexColor(value) {
+      return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+    }
+
+    /**
+     * Draw the user's own emoji set onto one 1024 px tile. Synchronous because
+     * a canvas can both draw and encode without waiting for a decoder.
+     * @param chars - the emoji characters to place, up to EMOJI_TILE_MAX.
+     * @returns a JPEG data URL, or null when nothing was drawn.
+     */
+    function renderEmojiTile(chars) {
+      const list = Array.from(typeof chars === 'string' ? chars : '').filter((ch) => ch.trim() !== '');
+      if (list.length === 0) return null;
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 1024;
+      const context = canvas.getContext('2d');
+      if (context === null || context === undefined) return null;
+      const background = context.createLinearGradient(0, 0, 1024, 1024);
+      background.addColorStop(0, EMOJI_TILE_BG[0]);
+      background.addColorStop(1, EMOJI_TILE_BG[1]);
+      context.fillStyle = background;
+      context.fillRect(0, 0, 1024, 1024);
+      const cols = list.length <= 4 ? 2 : 3;
+      const rows = Math.ceil(list.length / cols);
+      const cellWidth = 1024 / cols;
+      const cellHeight = 1024 / rows;
+      const fontSize = Math.round(Math.min(cellWidth, cellHeight) * 0.62);
+      context.font = fontSize + 'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Segoe UI Symbol", sans-serif';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillStyle = '#000000';
+      list.slice(0, EMOJI_TILE_MAX).forEach((ch, index) => {
+        const col = index % cols;
+        const row = Math.floor(index / cols);
+        context.fillText(ch, cellWidth * (col + 0.5), cellHeight * (row + 0.5));
+      });
+      return canvas.toDataURL('image/jpeg', 0.9);
+    }
+
+    /** Stylesheet painting a custom gradient backdrop. */
+    function customGradientCss(backdrop) {
+      const angle = typeof backdrop.angle === 'number' ? backdrop.angle : 135;
+      return [
+        'body {',
+        '  background-image: linear-gradient(' + angle + 'deg, ' + backdrop.from + ' 0%, ' + backdrop.to + ' 100%) !important;',
+        '  background-size: cover !important;',
+        '  background-attachment: fixed !important;',
+        '  background-repeat: no-repeat !important;',
+        '}',
+        '',
+      ].join('\n');
+    }
+
+    /** Stylesheet painting a solid backdrop color. */
+    function solidCss(backdrop) {
+      return [
+        'body {',
+        '  background-image: none !important;',
+        '  background-color: ' + backdrop.color + ' !important;',
+        '}',
+        '',
+      ].join('\n');
+    }
+
     /**
      * Stylesheet painting the chosen backdrop behind the whole window.
      * @param background - normalized backdrop.
@@ -800,6 +896,8 @@ window.__ModuleLoader__.load({
      * @returns the CSS text.
      */
     function backgroundCss(background, gradient) {
+      if (background.kind === 'color') return solidCss(background);
+      if (background.kind === 'gradient') return customGradientCss(background);
       const tile = background.mode === 'tile';
       const image = 'url("' + background.url + '")';
       const imageSize = tile ? '512px auto' : 'cover';
@@ -844,24 +942,37 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Normalize anything the page or storage hands back into a backdrop:
-     * `{ url, mode, preset }`, or null. Accepts a bare data URL for older
-     * saves, a preset id, and an inline object.
+     * Normalize anything the page or storage hands back into a backdrop.
+     * Kinds: `image` (a data URL), `preset` (a bundled emoji tile), `emoji`
+     * (the user's own emoji set), `color` (solid) and `gradient` (two stops).
+     * Legacy saves — a bare data URL or `{ preset, mode }` — still load.
      * @param value - stored or freshly picked value.
      * @returns the normalized backdrop, or null.
      */
     function normalizeBackground(value) {
       if (typeof value === 'string' && value.indexOf('data:image/') === 0) {
-        return { url: value, mode: 'cover', preset: null };
+        return { kind: 'image', url: value, mode: 'cover', preset: null };
       }
       if (value === null || typeof value !== 'object') return null;
+      if (value.kind === 'color' && isHexColor(value.color)) {
+        return { kind: 'color', color: value.color, url: null, mode: 'color', preset: null };
+      }
+      if (value.kind === 'gradient' && isHexColor(value.from) && isHexColor(value.to)) {
+        const angle = typeof value.angle === 'number' && Number.isFinite(value.angle) ? value.angle : 135;
+        return { kind: 'gradient', from: value.from, to: value.to, angle, url: null, mode: 'gradient', preset: null };
+      }
+      if (value.kind === 'emoji' && typeof value.chars === 'string' && value.chars.trim() !== '') {
+        const url = renderEmojiTile(value.chars);
+        if (url === null) return null;
+        return { kind: 'emoji', chars: value.chars, url, mode: 'tile', preset: null };
+      }
       if (typeof value.preset === 'string') {
         const preset = EMOJI_BACKGROUNDS.find((entry) => entry.id === value.preset);
         if (preset === undefined) return null;
-        return { url: preset.url, mode: 'tile', preset: preset.id };
+        return { kind: 'preset', preset: preset.id, url: preset.url, mode: 'tile', chars: null };
       }
       if (typeof value.url === 'string' && value.url.indexOf('data:image/') === 0) {
-        return { url: value.url, mode: value.mode === 'tile' ? 'tile' : 'cover', preset: null };
+        return { kind: 'image', url: value.url, mode: value.mode === 'tile' ? 'tile' : 'cover', preset: null };
       }
       return null;
     }
@@ -967,6 +1078,11 @@ window.__ModuleLoader__.load({
         }
       });
       const fileRef = React.useRef(null);
+      const [customEmoji, setCustomEmoji] = React.useState(() => (background !== null && background.kind === 'emoji' ? background.chars : ''));
+      const [solidColor, setSolidColor] = React.useState(() => (background !== null && background.kind === 'color' ? background.color : '#f3e8ff'));
+      const [gradientFrom, setGradientFrom] = React.useState(() => (background !== null && background.kind === 'gradient' ? background.from : '#ffd6e7'));
+      const [gradientTo, setGradientTo] = React.useState(() => (background !== null && background.kind === 'gradient' ? background.to : '#cfe8ff'));
+      const [gradientAngle, setGradientAngle] = React.useState(() => (background !== null && background.kind === 'gradient' ? String(background.angle) : '135'));
 
       React.useEffect(() => {
         if (typeof props.subscribeLocale !== 'function') return undefined;
@@ -1050,6 +1166,40 @@ window.__ModuleLoader__.load({
         }
       };
 
+      const applyCustomEmoji = () => {
+        try {
+          const chars = customEmoji.trim();
+          if (chars === '') return;
+          props.setBackgroundImage({ kind: 'emoji', chars });
+          setBackground({ kind: 'emoji', chars, url: renderEmojiTile(chars), mode: 'tile', preset: null });
+          setFailure(null);
+        } catch (error) {
+          setFailure(t('background.failed'));
+        }
+      };
+
+      const applySolidColor = () => {
+        try {
+          props.setBackgroundImage({ kind: 'color', color: solidColor });
+          setBackground({ kind: 'color', color: solidColor, url: null, mode: 'color', preset: null });
+          setFailure(null);
+        } catch (error) {
+          setFailure(error && error.message ? error.message : String(error));
+        }
+      };
+
+      const applyCustomGradient = () => {
+        try {
+          const angle = Number(gradientAngle);
+          const value = { kind: 'gradient', from: gradientFrom, to: gradientTo, angle: Number.isFinite(angle) ? angle : 135 };
+          props.setBackgroundImage(value);
+          setBackground({ ...value, url: null, mode: 'gradient', preset: null });
+          setFailure(null);
+        } catch (error) {
+          setFailure(error && error.message ? error.message : String(error));
+        }
+      };
+
       const card = (id, title, description, palettes) => {
         const active = selected === id;
         return h('button', {
@@ -1104,7 +1254,7 @@ window.__ModuleLoader__.load({
               background === null ? null : h('span', { className: 'dsh-theme-switcher-glass-badge' }, t('background.on'))),
             h('div', { className: 'dsh-theme-switcher-glass-desc' }, t('background.desc'))),
           h('div', { className: 'dsh-theme-switcher-bg-side' },
-            background === null ? null : h('img', { className: 'dsh-theme-switcher-bg-thumb', src: background.url, alt: '' }),
+            background === null || background.url === null || background.url === undefined ? null : h('img', { className: 'dsh-theme-switcher-bg-thumb', src: background.url, alt: '' }),
             h('div', { className: 'dsh-theme-switcher-bg-actions' },
               h('button', {
                 type: 'button',
@@ -1147,6 +1297,60 @@ window.__ModuleLoader__.load({
             style: { backgroundImage: 'url("' + preset.url + '")' },
             onClick: () => applyPreset(preset),
           }))),
+        h('p', { className: 'dsh-theme-switcher-label' }, t('background.customLabel')),
+        h('div', { className: 'dsh-theme-switcher-custom' },
+          h('div', { className: 'dsh-theme-switcher-custom-row' },
+            h('span', { className: 'dsh-theme-switcher-custom-name' }, t('background.customEmoji')),
+            h('input', {
+              type: 'text',
+              className: 'dsh-theme-switcher-custom-text',
+              value: customEmoji,
+              maxLength: 32,
+              placeholder: t('background.customEmojiHint'),
+              onChange: (event) => setCustomEmoji(event.target.value),
+            }),
+            h('button', {
+              type: 'button',
+              className: 'dsh-theme-switcher-bg-btn',
+              disabled: customEmoji.trim() === '',
+              onClick: applyCustomEmoji,
+            }, t('background.apply'))),
+          h('div', { className: 'dsh-theme-switcher-custom-row' },
+            h('span', { className: 'dsh-theme-switcher-custom-name' }, t('background.solid')),
+            h('input', {
+              type: 'color',
+              className: 'dsh-theme-switcher-color',
+              'aria-label': t('background.solid'),
+              value: solidColor,
+              onChange: (event) => setSolidColor(event.target.value),
+            }),
+            h('button', { type: 'button', className: 'dsh-theme-switcher-bg-btn', onClick: applySolidColor }, t('background.apply'))),
+          h('div', { className: 'dsh-theme-switcher-custom-row' },
+            h('span', { className: 'dsh-theme-switcher-custom-name' }, t('background.customGradient')),
+            h('input', {
+              type: 'color',
+              className: 'dsh-theme-switcher-color',
+              'aria-label': t('background.gradientFrom'),
+              value: gradientFrom,
+              onChange: (event) => setGradientFrom(event.target.value),
+            }),
+            h('input', {
+              type: 'color',
+              className: 'dsh-theme-switcher-color',
+              'aria-label': t('background.gradientTo'),
+              value: gradientTo,
+              onChange: (event) => setGradientTo(event.target.value),
+            }),
+            h('input', {
+              type: 'number',
+              className: 'dsh-theme-switcher-angle',
+              'aria-label': t('background.gradientAngle'),
+              min: 0,
+              max: 360,
+              value: gradientAngle,
+              onChange: (event) => setGradientAngle(event.target.value),
+            }),
+            h('button', { type: 'button', className: 'dsh-theme-switcher-bg-btn', onClick: applyCustomGradient }, t('background.apply')))),
         h('p', { className: 'dsh-theme-switcher-label' }, t('themes.label')),
         h('div', { className: 'dsh-theme-switcher-grid', role: 'group', 'aria-label': t('themes.label') }, cards),
         failure === null ? null : h('p', { className: 'dsh-theme-switcher-error', role: 'alert' },
@@ -1360,9 +1564,15 @@ window.__ModuleLoader__.load({
             window.localStorage.removeItem(BACKGROUND_STORAGE_KEY);
             return;
           }
-          const stored = background.preset !== null && background.preset !== undefined
-            ? { preset: background.preset, mode: 'tile' }
-            : { url: background.url, mode: background.mode };
+          const stored = background.kind === 'preset'
+            ? { kind: 'preset', preset: background.preset }
+            : background.kind === 'emoji'
+              ? { kind: 'emoji', chars: background.chars }
+              : background.kind === 'color'
+                ? { kind: 'color', color: background.color }
+                : background.kind === 'gradient'
+                  ? { kind: 'gradient', from: background.from, to: background.to, angle: background.angle }
+                  : { kind: 'image', url: background.url, mode: background.mode };
           window.localStorage.setItem(BACKGROUND_STORAGE_KEY, JSON.stringify(stored));
         } catch (error) {
           /* Quota or private mode: the image still applies for this page. */
@@ -1384,8 +1594,11 @@ window.__ModuleLoader__.load({
           }
           layerDispose = theme.overrideTokens(LAYER_SOURCE, tokens);
         }
+        // Only a photo or emoji backdrop has something for the palette gradient
+        // to blend with; a solid color or a custom gradient stands alone.
+        const blendable = background !== null && background.kind !== 'color' && background.kind !== 'gradient';
         const gradient = definition !== null && definition !== undefined
-          && definition.gradient !== undefined && blendEnabled === true
+          && definition.gradient !== undefined && blendEnabled === true && blendable
           ? definition.gradient
           : null;
         if (background !== null) applyBackgroundStyle(background, gradient);

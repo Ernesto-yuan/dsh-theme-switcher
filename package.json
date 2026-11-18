@@ -1,7 +1,7 @@
 {
   "name": "dsh-theme-switcher",
-  "version": "1.9.0",
-  "description": "Personalization for DSH: 20 light/dark palettes including macaron gradients and a rainbow, eight emoji backgrounds and a custom image, frosted glass, and a pinned sidebar page. 个性化：配色、渐变、Emoji 背景与高级材质。",
+  "version": "2.0.0",
+  "description": "Personalization for DSH: 20 light/dark palettes (including macaron gradients and a rainbow), a color and gradient picker, eight emoji backgrounds plus your own emoji set or image, frosted glass, and a pinned sidebar page. 个性化：配色、渐变、Emoji 与图片背景、毛玻璃。",
   "keywords": [
     "dsh",
     "dsh-plugin",
