@@ -472,6 +472,9 @@ window.__ModuleLoader__.load({
       'background.gradientFrom': '渐变起始色',
       'background.gradientTo': '渐变结束色',
       'background.gradientAngle': '渐变角度',
+      'background.gradientStop': '渐变颜色',
+      'background.stopAdd': '添加一种颜色',
+      'background.stopRemove': '删除这个颜色',
       'background.failed': '这张图片读不了，换一张试试',
       'background.emojiLabel': 'Emoji 背景',
       'background.emoji.sweet': '甜心',
@@ -560,6 +563,9 @@ window.__ModuleLoader__.load({
       'background.gradientFrom': 'Gradient start',
       'background.gradientTo': 'Gradient end',
       'background.gradientAngle': 'Angle',
+      'background.gradientStop': 'Gradient color',
+      'background.stopAdd': 'Add a color',
+      'background.stopRemove': 'Remove this color',
       'background.failed': 'That image could not be read; try another one',
       'background.emojiLabel': 'Emoji backgrounds',
       'background.emoji.sweet': 'Sweet',
@@ -673,6 +679,12 @@ window.__ModuleLoader__.load({
 .dsh-theme-switcher-custom-text:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
 .dsh-theme-switcher-color { flex: none; width: 40px; height: 28px; padding: 2px; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); cursor: pointer; }
 .dsh-theme-switcher-angle { box-sizing: border-box; flex: none; width: 64px; height: 28px; padding: 0 6px; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; }
+.dsh-theme-switcher-stop { display: inline-flex; align-items: center; gap: 2px; }
+.dsh-theme-switcher-stop-add, .dsh-theme-switcher-stop-remove { box-sizing: border-box; height: 28px; padding: 0; border: 1px dashed var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; line-height: 1; cursor: pointer; }
+.dsh-theme-switcher-stop-add { width: 24px; font-size: 14px; }
+.dsh-theme-switcher-stop-remove { width: 18px; border-style: solid; font-size: 13px; }
+.dsh-theme-switcher-stop-add:hover:not(:disabled), .dsh-theme-switcher-stop-remove:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
+.dsh-theme-switcher-stop-add:disabled { opacity: .4; cursor: default; }
 .dsh-theme-switcher-custom-list { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 8px; min-height: 28px; }
 .dsh-theme-switcher-custom-empty { font-size: 12px; line-height: 20px; color: var(--dsw-alias-label-secondary); }
 .dsh-theme-switcher-saved { display: flex; flex-direction: column; gap: 4px; width: 78px; }
@@ -868,9 +880,9 @@ window.__ModuleLoader__.load({
     function backdropThumbStyle(spec) {
       if (spec === null || typeof spec !== 'object') return {};
       if (spec.kind === 'color' && typeof spec.color === 'string') return { background: spec.color };
-      if (spec.kind === 'gradient' && typeof spec.from === 'string' && typeof spec.to === 'string') {
-        const angle = typeof spec.angle === 'number' ? spec.angle : 135;
-        return { backgroundImage: 'linear-gradient(' + angle + 'deg, ' + spec.from + ' 0%, ' + spec.to + ' 100%)' };
+      if (spec.kind === 'gradient') {
+        const stops = gradientStops(spec);
+        if (stops !== null) return { backgroundImage: gradientCssValue(stops.colors, stops.angle), backgroundSize: 'cover' };
       }
       if (spec.kind === 'emoji' && typeof spec.chars === 'string') {
         const url = emojiTileFor(spec.chars);
@@ -932,10 +944,13 @@ window.__ModuleLoader__.load({
 
     /** Stylesheet painting a custom gradient backdrop. */
     function customGradientCss(backdrop) {
+      const colors = Array.isArray(backdrop.colors) && backdrop.colors.length >= GRADIENT_MIN_STOPS
+        ? backdrop.colors
+        : [backdrop.from, backdrop.to];
       const angle = typeof backdrop.angle === 'number' ? backdrop.angle : 135;
       return [
         'body {',
-        '  background-image: linear-gradient(' + angle + 'deg, ' + backdrop.from + ' 0%, ' + backdrop.to + ' 100%) !important;',
+        '  background-image: ' + gradientCssValue(colors, angle) + ' !important;',
         '  background-size: cover !important;',
         '  background-attachment: fixed !important;',
         '  background-repeat: no-repeat !important;',
@@ -1008,11 +1023,35 @@ window.__ModuleLoader__.load({
       ].join('\n');
     }
 
+    /** Largest number of stops a custom gradient may carry. */
+    const GRADIENT_MAX_STOPS = 5;
+    /** Smallest number of stops a custom gradient needs. */
+    const GRADIENT_MIN_STOPS = 2;
+
+    /** Normalize a gradient spec into 2–5 colors plus an angle. */
+    function gradientStops(value) {
+      const raw = Array.isArray(value.colors)
+        ? value.colors
+        : isHexColor(value.from) && isHexColor(value.to) ? [value.from, value.to] : [];
+      const colors = raw.filter(isHexColor).slice(0, GRADIENT_MAX_STOPS);
+      if (colors.length < GRADIENT_MIN_STOPS) return null;
+      const angle = typeof value.angle === 'number' && Number.isFinite(value.angle) ? value.angle : 135;
+      return { colors, angle };
+    }
+
+    /** `linear-gradient()` text for an evenly spaced stop list. */
+    function gradientCssValue(colors, angle) {
+      const step = colors.length > 1 ? 100 / (colors.length - 1) : 100;
+      const stops = colors.map((color, index) => color + ' ' + Math.round(index * step) + '%').join(', ');
+      return 'linear-gradient(' + angle + 'deg, ' + stops + ')';
+    }
+
     /**
      * Normalize anything the page or storage hands back into a backdrop.
      * Kinds: `image` (a data URL), `preset` (a bundled emoji tile), `emoji`
-     * (the user's own emoji set), `color` (solid) and `gradient` (two stops).
-     * Legacy saves — a bare data URL or `{ preset, mode }` — still load.
+     * (the user's own emoji set), `color` (solid) and `gradient` (2–5 stops).
+     * Legacy saves — a bare data URL, `{ preset, mode }` or a two-stop
+     * gradient with `from`/`to` — still load.
      * @param value - stored or freshly picked value.
      * @returns the normalized backdrop, or null.
      */
@@ -1024,9 +1063,20 @@ window.__ModuleLoader__.load({
       if (value.kind === 'color' && isHexColor(value.color)) {
         return { kind: 'color', color: value.color, url: null, mode: 'color', preset: null };
       }
-      if (value.kind === 'gradient' && isHexColor(value.from) && isHexColor(value.to)) {
-        const angle = typeof value.angle === 'number' && Number.isFinite(value.angle) ? value.angle : 135;
-        return { kind: 'gradient', from: value.from, to: value.to, angle, url: null, mode: 'gradient', preset: null };
+      if (value.kind === 'gradient') {
+        const stops = gradientStops(value);
+        if (stops !== null) {
+          return {
+            kind: 'gradient',
+            colors: stops.colors,
+            from: stops.colors[0],
+            to: stops.colors[stops.colors.length - 1],
+            angle: stops.angle,
+            url: null,
+            mode: 'gradient',
+            preset: null,
+          };
+        }
       }
       if (value.kind === 'emoji' && typeof value.chars === 'string' && value.chars.trim() !== '') {
         const url = renderEmojiTile(value.chars);
@@ -1156,8 +1206,10 @@ window.__ModuleLoader__.load({
       const [customName, setCustomName] = React.useState('');
       const [customEmoji, setCustomEmoji] = React.useState(() => (background !== null && background.kind === 'emoji' ? background.chars : ''));
       const [solidColor, setSolidColor] = React.useState(() => (background !== null && background.kind === 'color' ? background.color : '#f3e8ff'));
-      const [gradientFrom, setGradientFrom] = React.useState(() => (background !== null && background.kind === 'gradient' ? background.from : '#ffd6e7'));
-      const [gradientTo, setGradientTo] = React.useState(() => (background !== null && background.kind === 'gradient' ? background.to : '#cfe8ff'));
+      const [gradientColors, setGradientColors] = React.useState(() => {
+        if (background !== null && background.kind === 'gradient') return background.colors.slice();
+        return ['#ffd6e7', '#cfe8ff'];
+      });
       const [gradientAngle, setGradientAngle] = React.useState(() => (background !== null && background.kind === 'gradient' ? String(background.angle) : '135'));
 
       React.useEffect(() => {
@@ -1268,10 +1320,25 @@ window.__ModuleLoader__.load({
         const angle = Number(gradientAngle);
         saveCustom({
           kind: 'gradient',
-          from: gradientFrom,
-          to: gradientTo,
+          colors: gradientColors.slice(0, GRADIENT_MAX_STOPS),
           angle: Number.isFinite(angle) ? angle : 135,
         });
+      };
+
+      const addGradientStop = () => {
+        setGradientColors((current) => (current.length >= GRADIENT_MAX_STOPS
+          ? current
+          : current.concat([current[current.length - 1] || '#ffffff'])));
+      };
+
+      const removeGradientStop = (index) => {
+        setGradientColors((current) => (current.length <= GRADIENT_MIN_STOPS
+          ? current
+          : current.filter((color, position) => position !== index)));
+      };
+
+      const setGradientStop = (index, color) => {
+        setGradientColors((current) => current.map((value, position) => (position === index ? color : value)));
       };
 
       const applySaved = (item) => {
@@ -1303,7 +1370,7 @@ window.__ModuleLoader__.load({
         if (backdrop === null) return {};
         if (backdrop.kind === 'color') return { background: backdrop.color };
         if (backdrop.kind === 'gradient') {
-          return { background: 'linear-gradient(' + backdrop.angle + 'deg, ' + backdrop.from + ', ' + backdrop.to + ')' };
+          return { backgroundImage: gradientCssValue(backdrop.colors, backdrop.angle), backgroundSize: 'cover' };
         }
         return { backgroundImage: 'url("' + backdrop.url + '")', backgroundSize: 'cover', backgroundPosition: 'center' };
       };
@@ -1313,7 +1380,7 @@ window.__ModuleLoader__.load({
         const backdrop = normalizeBackground(spec);
         if (backdrop === null) return 'var(--dsw-alias-brand-primary)';
         if (backdrop.kind === 'color') return backdrop.color;
-        if (backdrop.kind === 'gradient') return backdrop.to;
+        if (backdrop.kind === 'gradient') return backdrop.colors[backdrop.colors.length - 1];
         return 'var(--dsw-alias-brand-primary)';
       };
 
@@ -1485,20 +1552,31 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', className: 'dsh-theme-switcher-bg-btn', onClick: applySolidColor }, t('background.save'))),
           h('div', { className: 'dsh-theme-switcher-custom-row' },
             h('span', { className: 'dsh-theme-switcher-custom-name' }, t('background.customGradient')),
-            h('input', {
-              type: 'color',
-              className: 'dsh-theme-switcher-color',
-              'aria-label': t('background.gradientFrom'),
-              value: gradientFrom,
-              onChange: (event) => setGradientFrom(event.target.value),
-            }),
-            h('input', {
-              type: 'color',
-              className: 'dsh-theme-switcher-color',
-              'aria-label': t('background.gradientTo'),
-              value: gradientTo,
-              onChange: (event) => setGradientTo(event.target.value),
-            }),
+            gradientColors.map((color, index) => h('span', { key: 'stop-' + index, className: 'dsh-theme-switcher-stop' },
+              h('input', {
+                type: 'color',
+                className: 'dsh-theme-switcher-color',
+                'aria-label': t('background.gradientStop') + ' ' + (index + 1),
+                value: color,
+                onChange: (event) => setGradientStop(index, event.target.value),
+              }),
+              gradientColors.length > GRADIENT_MIN_STOPS
+                ? h('button', {
+                  type: 'button',
+                  className: 'dsh-theme-switcher-stop-remove',
+                  title: t('background.stopRemove'),
+                  'aria-label': t('background.stopRemove') + ' ' + (index + 1),
+                  onClick: () => removeGradientStop(index),
+                }, '−')
+                : null)),
+            h('button', {
+              type: 'button',
+              className: 'dsh-theme-switcher-stop-add',
+              title: t('background.stopAdd'),
+              'aria-label': t('background.stopAdd'),
+              disabled: gradientColors.length >= GRADIENT_MAX_STOPS,
+              onClick: addGradientStop,
+            }, '+'),
             h('input', {
               type: 'number',
               className: 'dsh-theme-switcher-angle',
@@ -1730,7 +1808,7 @@ window.__ModuleLoader__.load({
               : background.kind === 'color'
                 ? { kind: 'color', color: background.color }
                 : background.kind === 'gradient'
-                  ? { kind: 'gradient', from: background.from, to: background.to, angle: background.angle }
+                  ? { kind: 'gradient', colors: background.colors, angle: background.angle }
                   : { kind: 'image', url: background.url, mode: background.mode };
           window.localStorage.setItem(BACKGROUND_STORAGE_KEY, JSON.stringify(stored));
         } catch (error) {
